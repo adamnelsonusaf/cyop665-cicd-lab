@@ -1,0 +1,88 @@
+
+name: CYOP 665 Secure CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Build website
+        run: |
+          mkdir -p dist
+          cp index.html dist/index.html
+          test -s dist/index.html
+
+      - name: Package deployment artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+
+  test:
+    name: Test
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Run unit tests
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import unittest
+
+          class WebsiteTests(unittest.TestCase):
+              def test_hello_world(self):
+                  html = Path("index.html").read_text()
+                  self.assertIn("Hello, World!", html)
+
+              def test_html_structure(self):
+                  html = Path("index.html").read_text()
+                  self.assertIn("<html", html)
+                  self.assertIn("</html>", html)
+
+          unittest.main()
+          PY
+
+      - name: Run security checks
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          html = Path("index.html").read_text().lower()
+          assert "<script" not in html, "Script tag detected"
+          assert "http://" not in html, "Insecure HTTP detected"
+          print("Basic security checks passed")
+          PY
+
+  deploy:
+    name: Deploy
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Verify deployment branch
+        run: |
+          test "$GITHUB_REF" = "refs/heads/main"
+          echo "Authorized deployment branch"
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
